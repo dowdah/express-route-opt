@@ -4,14 +4,24 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
 from adjustText import adjust_text
+from itertools import product
 import os
 
 
 FONT_PATH = os.path.join(os.path.dirname(__file__), 'NotoSerifSC-VariableFont_wght.ttf')
+DRAW_FIGURES = False
 fm.fontManager.addfont(FONT_PATH)
 font_name = fm.FontProperties(fname=FONT_PATH).get_name()
 plt.rcParams['font.family'] = font_name
 plt.rcParams['axes.unicode_minus'] = False
+param_grid = {
+    'ants': [20, 50],
+    'iterations': [200],
+    'alpha': [1.0, 1.5],
+    'beta': [3.0, 5.0],
+    'rho': [0.3, 0.5],
+    'q': [100, 500]
+}
 
 
 def solve_tsp(coords, cost_coeff=None):
@@ -29,8 +39,8 @@ def solve_tsp(coords, cost_coeff=None):
     nodes = list(coords.keys())
     n = len(nodes)
 
-    # 计算距离矩阵
-    d = make_distances(coords, cost_coeff)
+    # 计算权重矩阵
+    weight = make_weight_matrix(coords, cost_coeff)
 
     # 定义问题
     prob = pulp.LpProblem("TSP_MTZ", pulp.LpMinimize)
@@ -49,7 +59,7 @@ def solve_tsp(coords, cost_coeff=None):
                               cat=pulp.LpInteger)
 
     # 目标函数：最小化总距离
-    prob += pulp.lpSum(d[(i, j)] * x[i][j] for i in nodes for j in nodes)
+    prob += pulp.lpSum(weight[(i, j)] * x[i][j] for i in nodes for j in nodes)
 
     # 约束1：每个代收点出度=1
     for i in nodes:
@@ -112,8 +122,8 @@ def solve_tsp_aco(coords, cost_coeff=None, ants=10, iterations=100, alpha=1.0, b
     """
     nodes = list(coords.keys())
 
-    # 计算距离矩阵
-    distances = make_distances(coords, cost_coeff)
+    # 计算权重矩阵
+    weight = make_weight_matrix(coords, cost_coeff)
 
     # 初始化信息素矩阵，全部设为1
     pheromone = {}
@@ -125,10 +135,10 @@ def solve_tsp_aco(coords, cost_coeff=None, ants=10, iterations=100, alpha=1.0, b
     heuristic = {}
     for i in nodes:
         for j in nodes:
-            if distances[(i, j)] == 0:
+            if weight[(i, j)] == 0:
                 heuristic[(i, j)] = 0
             else:
-                heuristic[(i, j)] = 1.0 / distances[(i, j)]
+                heuristic[(i, j)] = 1.0 / weight[(i, j)]
 
     best_tour = None
     best_length = float('inf')
@@ -181,7 +191,7 @@ def solve_tsp_aco(coords, cost_coeff=None, ants=10, iterations=100, alpha=1.0, b
             # 计算路径长度
             length = 0.0
             for i in range(len(tour) - 1):
-                length += distances[(tour[i], tour[i + 1])]
+                length += weight[(tour[i], tour[i + 1])]
 
             all_tours.append(tour)
             all_lengths.append(length)
@@ -209,6 +219,8 @@ def solve_tsp_aco(coords, cost_coeff=None, ants=10, iterations=100, alpha=1.0, b
 
 
 def draw_map(coords, tour=None, title="最优配送路径示意图"):
+    if not DRAW_FIGURES:
+        return
     fig, ax = plt.subplots(figsize=(8, 6))
     if tour:
         # 绘制路径折线
@@ -256,24 +268,61 @@ def draw_map(coords, tour=None, title="最优配送路径示意图"):
         plt.show()
 
 
-def make_distances(coords, cost_coeff=None):
+def make_weight_matrix(coords, cost_coeff=None):
+    """
+    计算权重矩阵。当 cost_coeff=None 时，使用欧几里得距离作为权重；否则，用欧几里得距离乘以成本系数作为权重。
+    输入:
+        coords: dict, 点编号 → (x, y) 坐标
+        cost_coeff: 成本系数矩阵
+    返回:
+        weight: dict, (i, j) → 权重
+    """
     nodes = list(coords.keys())
-    # 计算距离矩阵
-    distances = {}
+    weight = {}
     if cost_coeff is None:
         for i in nodes:
             for j in nodes:
                 xi, yi = coords[i]
                 xj, yj = coords[j]
-                distances[(i, j)] = math.hypot(xi - xj, yi - yj)
+                weight[(i, j)] = math.hypot(xi - xj, yi - yj)
     else:
         for i in nodes:
             for j in nodes:
                 xi, yi = coords[i]
                 xj, yj = coords[j]
                 euclid = math.hypot(xi - xj, yi - yj)
-                distances[(i, j)] = euclid * cost_coeff[i][j]
-    return distances
+                weight[(i, j)] = euclid * cost_coeff[i][j]
+    return weight
+
+
+def evaluate_aco_params(coords, cost_coeff, param_grid):
+    """
+    自动评估多组ACO参数组合。
+    输入:
+        coords: dict, 点编号 → (x, y) 坐标
+        cost_coeff: 成本系数矩阵
+        param_grid: dict, 参数名称 → 参数值列表
+    返回:
+        results: list, 每组参数的结果列表，包含参数组合、成本和路径
+    """
+    keys = list(param_grid.keys())
+    all_combinations = list(product(*[param_grid[k] for k in keys]))
+
+    results = []
+    for values in all_combinations:
+        params = dict(zip(keys, values))
+        print(f"评估参数组合: {params}")
+        tour, cost = solve_tsp_aco(coords, cost_coeff=cost_coeff, **params)
+        print(f"  → 成本: {cost:.2f}, 路径: {tour}")
+        results.append((params, cost, tour))
+
+    # 输出最优结果
+    best = min(results, key=lambda x: x[1])
+    print("\n最优组合:")
+    print(f"参数: {best[0]}")
+    print(f"成本: {best[1]:.2f}")
+    print(f"路径: {best[2]}")
+    return results
 
 
 if __name__ == "__main__":
@@ -315,11 +364,11 @@ if __name__ == "__main__":
     draw_map(coords_q2, tour, "最优配送路径示意图-问题二")
 
     # 问题三：加权TSP
-    best_tour, best_cost = solve_tsp_aco(full_coords, cost_coeff=cost_coeff, ants=50, iterations=200, alpha=1.0, beta=5.0, rho=0.5, q=100)
-    print("---问题三(蚁群算法)---")
-    print(f"最优路径: {best_tour}")
-    print(f"加权总成本: {best_cost:.2f}")
-    draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
+    # print("---问题三(蚁群算法)---")
+    # evaluate_aco_params(full_coords, cost_coeff, param_grid)
+    # print(f"最优路径: {best_tour}")
+    # print(f"加权总成本: {best_cost:.2f}")
+    # draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
     best_tour, best_cost = solve_tsp(full_coords, cost_coeff=cost_coeff)
     print("---问题三(分支定界法)---")
     print(f"最优路径: {best_tour}")
