@@ -9,7 +9,7 @@ import os
 
 
 FONT_PATH = os.path.join(os.path.dirname(__file__), 'NotoSerifSC-VariableFont_wght.ttf')
-DRAW_FIGURES = False
+DRAW_FIGURES = True
 fm.fontManager.addfont(FONT_PATH)
 font_name = fm.FontProperties(fname=FONT_PATH).get_name()
 plt.rcParams['font.family'] = font_name
@@ -218,7 +218,6 @@ def solve_tsp_aco(coords, cost_coeff=None, ants=10, iterations=100, alpha=1.0, b
     return best_tour, best_length
 
 
-# 问题四：考虑载重限制的多车路径优化
 def solve_multi_vehicle_routing_with_capacity(coords, demand, cost_coeff, capacity=4.0):
     """
     问题四：考虑载重限制的多车路径优化。
@@ -309,54 +308,63 @@ def solve_multi_vehicle_routing_with_capacity(coords, demand, cost_coeff, capaci
     return [r for r in routes if r], total_cost
 
 
-def draw_map(coords, tour=None, title="最优配送路径示意图"):
+def draw_map(coords, tour=None, routes=None, title="最优配送路径示意图"):
     if not DRAW_FIGURES:
         return
     fig, ax = plt.subplots(figsize=(8, 6))
-    if tour:
-        # 绘制路径折线
-        xs = [coords[node][0] for node in tour]
-        ys = [coords[node][1] for node in tour]
-        ax.plot(xs, ys, marker='o', linestyle='-', label='路径')
-        # 标注配送中心
+
+    # Plot multiple vehicle routes if provided
+    if routes:
+        # Plot each vehicle route with distinct color/label
+        for idx, route in enumerate(routes):
+            xs = [coords[node][0] for node in route]
+            ys = [coords[node][1] for node in route]
+            ax.plot(xs, ys, marker='o', linestyle='-',
+                    label=f'车辆 {idx+1} 路径')
+            # Label intermediate nodes
+            for node in route:
+                if node != 0:
+                    x, y = coords[node]
+                    ax.text(x, y, str(node), fontsize=12,
+                            ha='right', va='bottom')
+        # Mark depot
         ax.scatter(coords[0][0], coords[0][1],
                    s=200, marker='*', edgecolors='k', linewidths=1.5,
                    label='配送中心')
-        # 标注各代收点编号
+    # Single tour plotting (原有逻辑)
+    elif tour:
+        xs = [coords[node][0] for node in tour]
+        ys = [coords[node][1] for node in tour]
+        ax.plot(xs, ys, marker='o', linestyle='-', label='路径')
+        ax.scatter(coords[0][0], coords[0][1],
+                   s=200, marker='*', edgecolors='k', linewidths=1.5,
+                   label='配送中心')
         for node in tour:
             if node != 0:
                 x, y = coords[node]
                 ax.text(x, y, str(node), fontsize=12,
                         ha='right', va='bottom')
-        ax.set_title(title, fontsize=14)
-        ax.set_xlabel('X 坐标', fontsize=12)
-        ax.set_ylabel('Y 坐标', fontsize=12)
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.axis('equal')
-        ax.legend(loc='best')
-        plt.tight_layout()
-        plt.show()
+    # Only points plotting
     else:
-        # 绘制配送中心和代收点
         xs = [coords[node][0] for node in coords]
         ys = [coords[node][1] for node in coords]
         ax.scatter(xs, ys, marker='o', label='代收点')
         ax.scatter(coords[0][0], coords[0][1],
                    s=200, marker='*', edgecolors='k', linewidths=1.5,
                    label='配送中心')
-        # 添加每个点的坐标标签
         texts = []
         for node, (x, y) in coords.items():
             texts.append(ax.text(x, y, f'{node}({x:.3f},{y:.3f})', fontsize=12))
         adjust_text(texts, ax=ax, arrowprops=dict(arrowstyle='->', color='gray', lw=0.5))
-        ax.set_title(title, fontsize=14)
-        ax.set_xlabel('X 坐标', fontsize=12)
-        ax.set_ylabel('Y 坐标', fontsize=12)
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.axis('equal')
-        ax.legend(loc='best')
-        plt.tight_layout()
-        plt.show()
+
+    ax.set_title(title, fontsize=14)
+    ax.set_xlabel('X 坐标', fontsize=12)
+    ax.set_ylabel('Y 坐标', fontsize=12)
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.axis('equal')
+    ax.legend(loc='best')
+    plt.tight_layout()
+    plt.show()
 
 
 def make_weight_matrix(coords, cost_coeff=None):
@@ -439,36 +447,36 @@ if __name__ == "__main__":
     # 保存原始全量坐标以备题3使用
     full_coords = coords.copy()
 
-    # # 求解问题一
-    # tour, dist = solve_tsp(coords)
-    # print("---问题一---")
-    # print(f"最优路径: {tour}")
-    # print(f"总里程: {dist:.2f} 公里")
-    # draw_map(coords, tour, "最优配送路径示意图-问题一")
-    #
-    # # 问题二：部分需求TSP
-    # # 构造问题二的坐标集
-    # coords_q2 = full_coords.copy()
-    # for k in list(coords_q2.keys()):
-    #     if k != 0 and k not in need_delivery:
-    #         coords_q2.pop(k)
-    # tour, dist = solve_tsp(coords_q2)
-    # print("---问题二---")
-    # print(f"最优路径: {tour}")
-    # print(f"总里程: {dist:.2f} 公里")
-    # draw_map(coords_q2, tour, "最优配送路径示意图-问题二")
-    #
-    # # 问题三：加权TSP
-    # # print("---问题三(蚁群算法)---")
-    # # evaluate_aco_params(full_coords, cost_coeff, param_grid)
-    # # print(f"最优路径: {best_tour}")
-    # # print(f"加权总成本: {best_cost:.2f}")
-    # # draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
-    # best_tour, best_cost = solve_tsp(full_coords, cost_coeff=cost_coeff)
-    # print("---问题三(分支定界法)---")
+    # 求解问题一
+    tour, dist = solve_tsp(coords)
+    print("---问题一---")
+    print(f"最优路径: {tour}")
+    print(f"总里程: {dist:.2f} 公里")
+    draw_map(coords, tour, title="最优配送路径示意图-问题一")
+
+    # 问题二：部分需求TSP
+    # 构造问题二的坐标集
+    coords_q2 = full_coords.copy()
+    for k in list(coords_q2.keys()):
+        if k != 0 and k not in need_delivery:
+            coords_q2.pop(k)
+    tour, dist = solve_tsp(coords_q2)
+    print("---问题二---")
+    print(f"最优路径: {tour}")
+    print(f"总里程: {dist:.2f} 公里")
+    draw_map(coords_q2, tour, title="最优配送路径示意图-问题二")
+
+    # 问题三：加权TSP
+    # print("---问题三(蚁群算法)---")
+    # evaluate_aco_params(full_coords, cost_coeff, param_grid)
     # print(f"最优路径: {best_tour}")
     # print(f"加权总成本: {best_cost:.2f}")
     # draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
+    best_tour, best_cost = solve_tsp(full_coords, cost_coeff=cost_coeff)
+    print("---问题三(分支定界法)---")
+    print(f"最优路径: {best_tour}")
+    print(f"加权总成本: {best_cost:.2f}")
+    draw_map(full_coords, best_tour, title="最优配送路径示意图-问题三")
 
     # 问题四：多车辆载重约束路径规划
     print("---问题四---")
@@ -476,3 +484,4 @@ if __name__ == "__main__":
     for idx, route in enumerate(routes):
         print(f"车辆 {idx + 1} 路径: {route}")
     print(f"总运输成本: {total_cost:.2f}")
+    draw_map(full_coords, routes=routes, title="最优配送路径示意图-问题四")
