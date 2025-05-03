@@ -14,12 +14,13 @@ plt.rcParams['font.family'] = font_name
 plt.rcParams['axes.unicode_minus'] = False
 
 
-def solve_tsp(coords):
+def solve_tsp(coords, cost_coeff=None):
     """
     求解单辆车无约束TSP，使用整数线性规划（ILP）方法。
     输入:
         coords: dict, 点编号 → (x, y) 坐标
             其中 0 号点为配送中心，其余为代收点
+        cost_coeff: 成本系数矩阵
     返回:
         tour: list, 最优路径的点序列（含起点和终点0）
         total_dist: float, 总路程
@@ -29,12 +30,7 @@ def solve_tsp(coords):
     n = len(nodes)
 
     # 计算距离矩阵
-    d = {}
-    for i in nodes:
-        for j in nodes:
-            xi, yi = coords[i]
-            xj, yj = coords[j]
-            d[(i, j)] = math.hypot(xi - xj, yi - yj)
+    d = make_distances(coords, cost_coeff)
 
     # 定义问题
     prob = pulp.LpProblem("TSP_MTZ", pulp.LpMinimize)
@@ -98,11 +94,12 @@ def solve_tsp(coords):
     return tour, total_dist
 
 
-def solve_tsp_aco(coords, ants=10, iterations=100, alpha=1.0, beta=5.0, rho=0.5, q=100):
+def solve_tsp_aco(coords, cost_coeff=None, ants=10, iterations=100, alpha=1.0, beta=5.0, rho=0.5, q=100):
     """
     使用蚁群算法求解TSP。
     输入:
         coords: dict, 点编号 → (x, y) 坐标
+        cost_coeff: 成本系数矩阵
         ants: 蚂蚁数量
         iterations: 迭代次数
         alpha: 信息素重要程度因子
@@ -114,15 +111,9 @@ def solve_tsp_aco(coords, ants=10, iterations=100, alpha=1.0, beta=5.0, rho=0.5,
         best_length: float, 最短路径长度
     """
     nodes = list(coords.keys())
-    n = len(nodes)
 
     # 计算距离矩阵
-    distances = {}
-    for i in nodes:
-        for j in nodes:
-            xi, yi = coords[i]
-            xj, yj = coords[j]
-            distances[(i, j)] = math.hypot(xi - xj, yi - yj)
+    distances = make_distances(coords, cost_coeff)
 
     # 初始化信息素矩阵，全部设为1
     pheromone = {}
@@ -265,12 +256,45 @@ def draw_map(coords, tour=None, title="最优配送路径示意图"):
         plt.show()
 
 
+def make_distances(coords, cost_coeff=None):
+    nodes = list(coords.keys())
+    # 计算距离矩阵
+    distances = {}
+    if cost_coeff is None:
+        for i in nodes:
+            for j in nodes:
+                xi, yi = coords[i]
+                xj, yj = coords[j]
+                distances[(i, j)] = math.hypot(xi - xj, yi - yj)
+    else:
+        for i in nodes:
+            for j in nodes:
+                xi, yi = coords[i]
+                xj, yj = coords[j]
+                euclid = math.hypot(xi - xj, yi - yj)
+                distances[(i, j)] = euclid * cost_coeff[i][j]
+    return distances
+
+
 if __name__ == "__main__":
     # 读取附表1：配送中心和各代收点的坐标
     points_data = pd.read_excel("建模赛题附表数据.xlsx", sheet_name="附表1_坐标")
     points = points_data.sort_values("编号")[["横坐标", "纵坐标"]].values
     coords = {i: (x, y) for i, (x, y) in enumerate(points)}
+    # 读取附表2：当日需求二值表
+    delivery_flags_data = pd.read_excel("建模赛题附表数据.xlsx", sheet_name="附表2_配送情况")
+    need_delivery = delivery_flags_data[delivery_flags_data["配送情况"] == 1]["代收点编号"].tolist()
+    # 读取附表3：道路单位成本系数
+    cost_df = pd.read_excel("建模赛题附表数据.xlsx", sheet_name="附表3_成本比例")
+    cost_coeff_df = cost_df.pivot(index='起点编号', columns='终点编号', values='成本比例')
+    cost_coeff_df = cost_coeff_df.sort_index().sort_index(axis=1).fillna(0)
+    cost_coeff = cost_coeff_df.values
+    # 画出配送中心和代收点坐标示意图
     draw_map(coords, title="配送中心和代收点坐标示意图")
+
+    # 保存原始全量坐标以备题3使用
+    full_coords = coords.copy()
+
     # 求解问题一
     tour, dist = solve_tsp(coords)
     print("---问题一---")
@@ -278,17 +302,26 @@ if __name__ == "__main__":
     print(f"总里程: {dist:.2f} 公里")
     draw_map(coords, tour, "最优配送路径示意图-问题一")
 
-    # 读取附表2：是否需要配送货物
-    delivery_flags_data = pd.read_excel("建模赛题附表数据.xlsx", sheet_name="附表2_配送情况")
-    need_delivery = delivery_flags_data[delivery_flags_data["配送情况"] == 1]["代收点编号"].tolist()
-    # 删去不需要配送的点
-    coords_iter = coords.copy()
-    for k in coords_iter.keys():
-        if k not in need_delivery and k != 0:
-            coords.pop(k)
-    # 求解问题二
-    tour, dist = solve_tsp(coords)
+    # 问题二：部分需求TSP
+    # 构造问题二的坐标集
+    coords_q2 = full_coords.copy()
+    for k in list(coords_q2.keys()):
+        if k != 0 and k not in need_delivery:
+            coords_q2.pop(k)
+    tour, dist = solve_tsp(coords_q2)
     print("---问题二---")
     print(f"最优路径: {tour}")
     print(f"总里程: {dist:.2f} 公里")
-    draw_map(coords, tour, "最优配送路径示意图-问题二")
+    draw_map(coords_q2, tour, "最优配送路径示意图-问题二")
+
+    # 问题三：加权TSP
+    best_tour, best_cost = solve_tsp_aco(full_coords, cost_coeff=cost_coeff, ants=50, iterations=200, alpha=1.0, beta=5.0, rho=0.5, q=100)
+    print("---问题三(蚁群算法)---")
+    print(f"最优路径: {best_tour}")
+    print(f"加权总成本: {best_cost:.2f}")
+    draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
+    best_tour, best_cost = solve_tsp(full_coords, cost_coeff=cost_coeff)
+    print("---问题三(分支定界法)---")
+    print(f"最优路径: {best_tour}")
+    print(f"加权总成本: {best_cost:.2f}")
+    draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
