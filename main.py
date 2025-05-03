@@ -218,6 +218,97 @@ def solve_tsp_aco(coords, cost_coeff=None, ants=10, iterations=100, alpha=1.0, b
     return best_tour, best_length
 
 
+# 问题四：考虑载重限制的多车路径优化
+def solve_multi_vehicle_routing_with_capacity(coords, demand, cost_coeff, capacity=4.0):
+    """
+    问题四：考虑载重限制的多车路径优化。
+    输入:
+        coords: dict, 点编号 → (x, y) 坐标
+        demand: dict, 点编号 → 需求量（吨），配送中心为0点，需求量为0
+        cost_coeff: 成本系数矩阵（二维数组或DataFrame）
+        capacity: float, 每辆车最大载重（吨）
+    返回:
+        routes: list of lists，每辆车的路径序列（均以0开始和结束）
+        total_cost: float, 总运输成本
+    """
+
+    nodes = list(coords.keys())
+    n = len(nodes)
+
+    # 计算加权成本
+    weight = make_weight_matrix(coords, cost_coeff)
+
+    # 初始化模型
+    prob = pulp.LpProblem("Multi_Vehicle_VRP", pulp.LpMinimize)
+
+    # 最大车辆数量：最多每个点一辆车服务
+    K = len([i for i in nodes if i != 0])
+
+    # 决策变量 x[i][j][k]：第k辆车是否走边(i,j)
+    x = pulp.LpVariable.dicts("x", (range(n), range(n), range(K)), 0, 1, cat=pulp.LpBinary)
+    # u[i]: 车载货量辅助变量（用于消除子环）
+    u = pulp.LpVariable.dicts("u", (range(n)), 0, capacity, cat=pulp.LpContinuous)
+
+    # y[i][k]：代收点 i 是否由第k辆车服务
+    y = pulp.LpVariable.dicts("y", (range(n), range(K)), 0, 1, cat=pulp.LpBinary)
+
+    # 目标函数：总运输成本
+    prob += pulp.lpSum(weight[(i, j)] * x[i][j][k] for i in range(n) for j in range(n) for k in range(K))
+
+    # 每个代收点必须被服务一次
+    for j in range(1, n):
+        prob += pulp.lpSum(y[j][k] for k in range(K)) == 1
+
+    # 每辆车路径起点和终点都在配送中心
+    for k in range(K):
+        prob += pulp.lpSum(x[0][j][k] for j in range(1, n)) <= 1
+        prob += pulp.lpSum(x[i][0][k] for i in range(1, n)) <= 1
+
+    # 流量守恒约束 + 关联x和y变量
+    for k in range(K):
+        for h in range(1, n):
+            prob += (pulp.lpSum(x[i][h][k] for i in range(n) if i != h) -
+                     pulp.lpSum(x[h][j][k] for j in range(n) if j != h)) == 0
+            prob += pulp.lpSum(x[i][h][k] for i in range(n) if i != h) == y[h][k]
+
+    # 载重约束
+    for k in range(K):
+        prob += pulp.lpSum(demand[j] * y[j][k] for j in range(1, n)) <= capacity
+
+    # 消除子环约束（MTZ）
+    for i in range(1, n):
+        for j in range(1, n):
+            if i != j:
+                for k in range(K):
+                    prob += u[i] - u[j] + capacity * x[i][j][k] <= capacity - demand[j]
+
+    # 求解模型
+    solver = pulp.PULP_CBC_CMD(msg=False)
+    prob.solve(solver)
+
+    # 提取路线
+    routes = [[] for _ in range(K)]
+    for k in range(K):
+        current = 0
+        route = [0]
+        visited = set()
+        while True:
+            nexts = [j for j in range(n) if j != current and pulp.value(x[current][j][k]) > 0.5]
+            if not nexts:
+                break
+            nxt = nexts[0]
+            route.append(nxt)
+            visited.add(nxt)
+            current = nxt
+            if nxt == 0:
+                break
+        if len(route) > 1:
+            routes[k] = route
+
+    total_cost = pulp.value(prob.objective)
+    return [r for r in routes if r], total_cost
+
+
 def draw_map(coords, tour=None, title="最优配送路径示意图"):
     if not DRAW_FIGURES:
         return
@@ -338,39 +429,50 @@ if __name__ == "__main__":
     cost_coeff_df = cost_df.pivot(index='起点编号', columns='终点编号', values='成本比例')
     cost_coeff_df = cost_coeff_df.sort_index().sort_index(axis=1).fillna(0)
     cost_coeff = cost_coeff_df.values
+    # 读取附表4：各代收点货物量
+    demand_data = pd.read_excel("建模赛题附表数据.xlsx", sheet_name="附表4_货物量")
+    demand_list = demand_data["货物量（吨）"].tolist()
+    demand_dict = {i: (0.0 if i == 0 else demand_list[i - 1]) for i in range(len(demand_list) + 1)}
     # 画出配送中心和代收点坐标示意图
     draw_map(coords, title="配送中心和代收点坐标示意图")
 
     # 保存原始全量坐标以备题3使用
     full_coords = coords.copy()
 
-    # 求解问题一
-    tour, dist = solve_tsp(coords)
-    print("---问题一---")
-    print(f"最优路径: {tour}")
-    print(f"总里程: {dist:.2f} 公里")
-    draw_map(coords, tour, "最优配送路径示意图-问题一")
-
-    # 问题二：部分需求TSP
-    # 构造问题二的坐标集
-    coords_q2 = full_coords.copy()
-    for k in list(coords_q2.keys()):
-        if k != 0 and k not in need_delivery:
-            coords_q2.pop(k)
-    tour, dist = solve_tsp(coords_q2)
-    print("---问题二---")
-    print(f"最优路径: {tour}")
-    print(f"总里程: {dist:.2f} 公里")
-    draw_map(coords_q2, tour, "最优配送路径示意图-问题二")
-
-    # 问题三：加权TSP
-    # print("---问题三(蚁群算法)---")
-    # evaluate_aco_params(full_coords, cost_coeff, param_grid)
+    # # 求解问题一
+    # tour, dist = solve_tsp(coords)
+    # print("---问题一---")
+    # print(f"最优路径: {tour}")
+    # print(f"总里程: {dist:.2f} 公里")
+    # draw_map(coords, tour, "最优配送路径示意图-问题一")
+    #
+    # # 问题二：部分需求TSP
+    # # 构造问题二的坐标集
+    # coords_q2 = full_coords.copy()
+    # for k in list(coords_q2.keys()):
+    #     if k != 0 and k not in need_delivery:
+    #         coords_q2.pop(k)
+    # tour, dist = solve_tsp(coords_q2)
+    # print("---问题二---")
+    # print(f"最优路径: {tour}")
+    # print(f"总里程: {dist:.2f} 公里")
+    # draw_map(coords_q2, tour, "最优配送路径示意图-问题二")
+    #
+    # # 问题三：加权TSP
+    # # print("---问题三(蚁群算法)---")
+    # # evaluate_aco_params(full_coords, cost_coeff, param_grid)
+    # # print(f"最优路径: {best_tour}")
+    # # print(f"加权总成本: {best_cost:.2f}")
+    # # draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
+    # best_tour, best_cost = solve_tsp(full_coords, cost_coeff=cost_coeff)
+    # print("---问题三(分支定界法)---")
     # print(f"最优路径: {best_tour}")
     # print(f"加权总成本: {best_cost:.2f}")
     # draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
-    best_tour, best_cost = solve_tsp(full_coords, cost_coeff=cost_coeff)
-    print("---问题三(分支定界法)---")
-    print(f"最优路径: {best_tour}")
-    print(f"加权总成本: {best_cost:.2f}")
-    draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
+
+    # 问题四：多车辆载重约束路径规划
+    print("---问题四---")
+    routes, total_cost = solve_multi_vehicle_routing_with_capacity(full_coords, demand_dict, cost_coeff)
+    for idx, route in enumerate(routes):
+        print(f"车辆 {idx + 1} 路径: {route}")
+    print(f"总运输成本: {total_cost:.2f}")
