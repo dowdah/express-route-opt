@@ -467,13 +467,8 @@ if __name__ == "__main__":
     draw_map(coords_q2, tour, title="最优配送路径示意图-问题二")
 
     # 问题三：加权TSP
-    # print("---问题三(蚁群算法)---")
-    # evaluate_aco_params(full_coords, cost_coeff, param_grid)
-    # print(f"最优路径: {best_tour}")
-    # print(f"加权总成本: {best_cost:.2f}")
-    # draw_map(full_coords, best_tour, "最优配送路径示意图-问题三")
     best_tour, best_cost = solve_tsp(full_coords, cost_coeff=cost_coeff)
-    print("---问题三(分支定界法)---")
+    print("---问题三---")
     print(f"最优路径: {best_tour}")
     print(f"加权总成本: {best_cost:.2f}")
     draw_map(full_coords, best_tour, title="最优配送路径示意图-问题三")
