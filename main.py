@@ -467,7 +467,7 @@ if __name__ == "__main__":
     draw_map(coords_q2, tour, title="最优配送路径示意图-问题二")
 
     # 问题三：加权TSP
-    best_tour, best_cost = solve_tsp(full_coords, cost_coeff=cost_coeff)
+    best_tour, best_cost = solve_tsp(coords_q2, cost_coeff=cost_coeff)
     print("---问题三---")
     print(f"最优路径: {best_tour}")
     print(f"加权总成本: {best_cost:.2f}")
